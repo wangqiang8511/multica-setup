@@ -8,13 +8,13 @@
 #   - agent.yaml             (name, description, model, visibility, max_concurrent_tasks)
 #   - instructions.md        (body used as --instructions)
 #   - target_skills.md       (one skills.sh URL or bare skill name per line)
-#   - config.env             (optional — KEY=VALUE env vars; see note below)
+#   - config.env             (optional — KEY=VALUE env vars applied as custom_env)
 #   - custom_args.json       (optional — JSON array of CLI args)
 #
-# Env note: the `multica agent create` CLI does not currently expose a
-# --custom-env flag. If config.env is non-empty, the script prints the env
-# payload at the end so you can copy it into the Multica web UI, and writes
-# it to the run log file next to the agent dir.
+# config.env is applied via `multica agent (create|update) --custom-env-stdin`
+# so values never appear on the command line. Requires multica CLI >= 0.2.23.
+# On older CLIs the script aborts with an upgrade hint rather than silently
+# dropping the env.
 
 set -o errexit
 set -o nounset
@@ -297,19 +297,19 @@ fi
 
 log_ok "${#SKILL_IDS[@]} skill(s) resolved"
 
-# --- env preview -----------------------------------------------------------
+# --- env (config.env -> custom_env) ---------------------------------------
 
-ENV_LINES=()
-if [[ -f "$ENV_FILE" ]]; then
-  while IFS= read -r line; do ENV_LINES+=("$line"); done < <(read_env_file "$ENV_FILE")
-fi
-
-if [[ ${#ENV_LINES[@]} -gt 0 ]]; then
-  log_warn "config.env contains ${#ENV_LINES[@]} var(s)."
-  log_warn "The multica CLI has no --custom-env flag; set these via the web UI:"
-  for kv in "${ENV_LINES[@]}"; do
-    printf '    %s\n' "$kv" >&2
-  done
+# Build a JSON object from config.env. Empty object when the file is absent
+# or contains no vars. We pass this via --custom-env-stdin so values never
+# appear in `ps` output or shell history.
+CUSTOM_ENV_JSON=$(env_file_to_json "$ENV_FILE")
+ENV_KEY_COUNT=$(jq -r 'length' <<<"$CUSTOM_ENV_JSON")
+ENV_KEYS_PREVIEW=""
+if [[ "$ENV_KEY_COUNT" -gt 0 ]]; then
+  ENV_KEYS_PREVIEW=$(jq -r 'keys | join(", ")' <<<"$CUSTOM_ENV_JSON")
+  if ! cli_supports_flag "agent create" "--custom-env-stdin"; then
+    die "config.env has $ENV_KEY_COUNT var(s) but this multica CLI has no --custom-env-stdin flag. Upgrade: \`multica update\` (need >= 0.2.23)."
+  fi
 fi
 
 # --- find existing agent by name ------------------------------------------
@@ -336,6 +336,7 @@ About to $ACTION agent:
   runtime:              $CHOSEN_LABEL
   skills:               ${#SKILL_IDS[@]}
   custom_args:          $CUSTOM_ARGS_JSON
+  custom_env:           ${ENV_KEY_COUNT} key(s)${ENV_KEYS_PREVIEW:+ — $ENV_KEYS_PREVIEW}
   existing id:          ${EXISTING_AGENT_ID:-<new>}
 
 EOF
@@ -356,35 +357,47 @@ run_or_echo() {
   "$@"
 }
 
+# We always send --custom-env-stdin (even with "{}") so both a create and a
+# subsequent update converge on the declared state instead of drifting.
 if [[ "$ACTION" == "create" ]]; then
   log_info "Creating agent…"
-  create_out=$(run_or_echo multica agent create \
-    --name "$AGENT_NAME" \
-    --description "$AGENT_DESC" \
-    --instructions "$INSTRUCTIONS" \
-    --runtime-id "$CHOSEN_RUNTIME_ID" \
-    --visibility "$AGENT_VISIBILITY" \
-    --max-concurrent-tasks "$AGENT_MAX_CONCURRENT" \
-    ${AGENT_MODEL:+--model "$AGENT_MODEL"} \
-    --custom-args "$CUSTOM_ARGS_JSON" \
-    --output json)
-  if [[ $DRY_RUN -ne 1 ]]; then
+  if [[ $DRY_RUN -eq 1 ]]; then
+    printf '(dry-run) multica agent create --name %q ... --custom-env-stdin <<< {%d key(s)%s%s}\n' \
+      "$AGENT_NAME" "$ENV_KEY_COUNT" "${ENV_KEYS_PREVIEW:+: }" "$ENV_KEYS_PREVIEW" >&2
+  else
+    create_out=$(printf '%s' "$CUSTOM_ENV_JSON" | multica agent create \
+      --name "$AGENT_NAME" \
+      --description "$AGENT_DESC" \
+      --instructions "$INSTRUCTIONS" \
+      --runtime-id "$CHOSEN_RUNTIME_ID" \
+      --visibility "$AGENT_VISIBILITY" \
+      --max-concurrent-tasks "$AGENT_MAX_CONCURRENT" \
+      ${AGENT_MODEL:+--model "$AGENT_MODEL"} \
+      --custom-args "$CUSTOM_ARGS_JSON" \
+      --custom-env-stdin \
+      --output json)
     EXISTING_AGENT_ID=$(jq -r '.id' <<<"$create_out")
     log_ok "Created agent: $EXISTING_AGENT_ID"
   fi
 else
   log_info "Updating agent $EXISTING_AGENT_ID…"
-  run_or_echo multica agent update "$EXISTING_AGENT_ID" \
-    --name "$AGENT_NAME" \
-    --description "$AGENT_DESC" \
-    --instructions "$INSTRUCTIONS" \
-    --runtime-id "$CHOSEN_RUNTIME_ID" \
-    --visibility "$AGENT_VISIBILITY" \
-    --max-concurrent-tasks "$AGENT_MAX_CONCURRENT" \
-    --model "$AGENT_MODEL" \
-    --custom-args "$CUSTOM_ARGS_JSON" \
-    --output json >/dev/null
-  log_ok "Updated agent: $EXISTING_AGENT_ID"
+  if [[ $DRY_RUN -eq 1 ]]; then
+    printf '(dry-run) multica agent update %s ... --custom-env-stdin <<< {%d key(s)%s%s}\n' \
+      "$EXISTING_AGENT_ID" "$ENV_KEY_COUNT" "${ENV_KEYS_PREVIEW:+: }" "$ENV_KEYS_PREVIEW" >&2
+  else
+    printf '%s' "$CUSTOM_ENV_JSON" | multica agent update "$EXISTING_AGENT_ID" \
+      --name "$AGENT_NAME" \
+      --description "$AGENT_DESC" \
+      --instructions "$INSTRUCTIONS" \
+      --runtime-id "$CHOSEN_RUNTIME_ID" \
+      --visibility "$AGENT_VISIBILITY" \
+      --max-concurrent-tasks "$AGENT_MAX_CONCURRENT" \
+      --model "$AGENT_MODEL" \
+      --custom-args "$CUSTOM_ARGS_JSON" \
+      --custom-env-stdin \
+      --output json >/dev/null
+    log_ok "Updated agent: $EXISTING_AGENT_ID"
+  fi
 fi
 
 # --- skill assignment -----------------------------------------------------
