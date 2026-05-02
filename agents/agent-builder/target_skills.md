@@ -10,3 +10,8 @@
 
 https://skills.sh/vercel-labs/skills/find-skills
 https://skills.sh/obra/superpowers/writing-skills
+
+# Custom workspace skill — no public skills.sh URL yet. Pushed separately via
+# `./scripts/push-skill.sh skills/multica-cli`; referenced here by bare name
+# so create-agent.sh picks it up from the workspace's skill list.
+multica-cli
