@@ -1,0 +1,66 @@
+# Agents
+
+Each subdirectory in `agents/` defines one Multica agent. The `_template/`
+directory is the starting point — copy it, fill in the fields, open a PR,
+then run the create script.
+
+## Directory layout
+
+```
+agents/
+  <agent-name>/
+    instructions.md       # required — becomes the agent's `instructions` field
+    target_skills.md      # required — list of skills.sh URLs (one per line)
+    config.env            # optional — KEY=VALUE env vars (becomes custom_env)
+    custom_args.json      # optional — JSON array of CLI args (becomes custom_args)
+    agent.yaml            # required — name, description, model, visibility, etc.
+```
+
+The `agent.yaml` carries the static metadata the CLI needs:
+
+```yaml
+name: Agent Builder
+description: Builds other agents
+model: ""                 # leave empty if passing --model via custom_args
+visibility: private       # private | workspace
+max_concurrent_tasks: 6
+```
+
+## Workflow
+
+1. **Scaffold** — `cp -r agents/_template agents/<new-agent>` and edit the files.
+2. **Draft instructions** — write `instructions.md`. Include identity, working
+   style, and constraints.
+3. **List skills** — in `target_skills.md`, list one `skills.sh` URL per line
+   (or a bare skill name already present in the workspace). Lines starting with
+   `#` are comments.
+4. **Runtime config** — populate `config.env` and `custom_args.json` if the
+   agent needs specific env vars (e.g. `CLAUDE_CODE_USE_BEDROCK=1`) or CLI
+   flags.
+5. **PR review** — open a pull request against `main`. Only merged agents get
+   created in Multica.
+6. **Create / update** — run the interactive script:
+
+   ```bash
+   ./scripts/create-agent.sh agents/<new-agent>
+   ```
+
+   The script will:
+
+   - Let you pick a runtime from the online runtimes in the workspace.
+   - Import any skills from `target_skills.md` that are not yet in the
+     workspace (`multica skill import --url ...`).
+   - Create the agent if it does not exist, or update it if an agent with the
+     same `name` already does.
+   - Assign the listed skills to the agent.
+
+## Conventions
+
+- **Names are identity.** `agent.yaml.name` is how the script finds an
+  existing agent to update. Do not rename without manually archiving the old
+  one first.
+- **Secrets don't live here.** `config.env` is for non-sensitive config. Real
+  secrets should be injected at create time via `--extra-env KEY=VALUE` on the
+  script (which adds to, not replaces, the file-based env).
+- **Skills are portable.** Prefer `skills.sh` URLs over custom skills so the
+  definition works on any workspace.

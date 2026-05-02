@@ -1,0 +1,8 @@
+# Static metadata for this agent.
+# Referenced by scripts/create-agent.sh.
+
+name: ""                     # required — displayed name and update-lookup key
+description: ""              # short one-line description
+model: ""                    # e.g. claude-sonnet-4-6. Leave "" if set via custom_args.
+visibility: private          # private | workspace
+max_concurrent_tasks: 6

@@ -1,0 +1,7 @@
+name: Agent Builder
+description: Build Agents
+# Model is passed via custom_args because the Claude-on-Bedrock runtime
+# expects the region-qualified ID (global.anthropic.claude-opus-4-7).
+model: ""
+visibility: private
+max_concurrent_tasks: 6
