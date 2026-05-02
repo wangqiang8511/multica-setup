@@ -50,7 +50,11 @@ max_concurrent_tasks: 6
 
    The script will:
 
-   - Let you pick a runtime from the online runtimes in the workspace.
+   - Let you pick the target **workspace** from the workspaces you belong to
+     (or pass `--workspace <id|name>` to skip the prompt). The chosen
+     workspace is printed and scopes every subsequent `multica` call, so
+     the agent is always created exactly where you confirmed.
+   - Let you pick a runtime from the online runtimes in that workspace.
    - Import any skills from `target_skills.md` that are not yet in the
      workspace (`multica skill import --url ...`).
    - Create the agent if it does not exist, or update it if an agent with the

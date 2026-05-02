@@ -33,18 +33,20 @@ require_cmd multica jq
 AGENT_DIR=""
 DRY_RUN=0
 AUTO_YES=0
+WORKSPACE_ARG=""
 
 usage() {
   cat <<EOF >&2
-Usage: $0 <agent-dir> [--dry-run] [--yes]
+Usage: $0 <agent-dir> [--workspace <id|name>] [--dry-run] [--yes]
 
-  <agent-dir>   Path to the agent definition (e.g. agents/agent-builder)
-  --dry-run     Print the multica commands but don't run them
-  --yes         Don't prompt for final confirmation
+  <agent-dir>            Path to the agent definition (e.g. agents/agent-builder)
+  --workspace <id|name>  Target workspace (skips the interactive picker)
+  --dry-run              Print the multica commands but don't run them
+  --yes                  Don't prompt for final confirmation
 
-The script picks a runtime interactively from the online runtimes in the
-current Multica workspace, imports skills listed in target_skills.md, then
-creates or updates the agent.
+The script picks a workspace interactively (or uses --workspace), picks a
+runtime from the online runtimes in that workspace, imports skills listed
+in target_skills.md, then creates or updates the agent.
 EOF
 }
 
@@ -53,6 +55,12 @@ while [[ $# -gt 0 ]]; do
     -h|--help) usage; exit 0 ;;
     --dry-run) DRY_RUN=1 ;;
     --yes|-y)  AUTO_YES=1 ;;
+    -w|--workspace)
+      [[ $# -ge 2 ]] || die "--workspace requires a value"
+      WORKSPACE_ARG=$2
+      shift
+      ;;
+    --workspace=*) WORKSPACE_ARG=${1#*=} ;;
     --) shift; AGENT_DIR=${1:-}; break ;;
     -*) die "unknown flag: $1" ;;
     *)
@@ -129,6 +137,85 @@ if [[ -f "$ARGS_FILE" ]]; then
     die "custom_args.json must be a JSON array"
   fi
 fi
+
+# --- pick workspace --------------------------------------------------------
+
+log_info "Fetching workspaces…"
+# `multica workspace list` only supports table output, so parse two columns.
+WORKSPACES_RAW=$(multica workspace list)
+WS_IDS=()
+WS_NAMES=()
+WS_LABELS=()
+while IFS=$'\t' read -r ws_id ws_name; do
+  [[ -z "${ws_id:-}" ]] && continue
+  WS_IDS+=("$ws_id")
+  WS_NAMES+=("$ws_name")
+  WS_LABELS+=("$ws_name  ($ws_id)")
+done < <(printf '%s\n' "$WORKSPACES_RAW" \
+  | awk 'NR>1 && NF>=2 {id=$1; $1=""; sub(/^[ \t]+/, ""); printf "%s\t%s\n", id, $0}')
+
+[[ ${#WS_IDS[@]} -gt 0 ]] || die "no workspaces returned by 'multica workspace list'"
+
+CURRENT_WS_ID="${MULTICA_WORKSPACE_ID:-}"
+
+resolve_workspace() {
+  # $1 = id-or-name; prints the id on stdout (empty on no match).
+  local q="$1" i
+  for i in "${!WS_IDS[@]}"; do
+    if [[ "${WS_IDS[$i]}" == "$q" || "${WS_NAMES[$i]}" == "$q" ]]; then
+      printf '%s' "${WS_IDS[$i]}"
+      return 0
+    fi
+  done
+  printf ''
+}
+
+WORKSPACE_ID=""
+WORKSPACE_NAME=""
+if [[ -n "$WORKSPACE_ARG" ]]; then
+  WORKSPACE_ID=$(resolve_workspace "$WORKSPACE_ARG")
+  [[ -n "$WORKSPACE_ID" ]] || die "workspace '$WORKSPACE_ARG' not found (try: multica workspace list)"
+  log_ok "Workspace (from --workspace): $WORKSPACE_ARG"
+elif [[ ${#WS_IDS[@]} -eq 1 ]]; then
+  WORKSPACE_ID="${WS_IDS[0]}"
+  log_info "Only one workspace available — using it automatically."
+else
+  # Put the current workspace first in the menu so the common case is the
+  # obvious choice.
+  default_hint=""
+  if [[ -n "$CURRENT_WS_ID" ]]; then
+    for i in "${!WS_IDS[@]}"; do
+      if [[ "${WS_IDS[$i]}" == "$CURRENT_WS_ID" ]]; then
+        default_hint=" [current: ${WS_NAMES[$i]}]"
+        break
+      fi
+    done
+  fi
+  CHOSEN_WS_LABEL=$(pick_from_menu "Select a workspace to create the agent in:${default_hint}" "${WS_LABELS[@]}")
+  for i in "${!WS_LABELS[@]}"; do
+    if [[ "${WS_LABELS[$i]}" == "$CHOSEN_WS_LABEL" ]]; then
+      WORKSPACE_ID="${WS_IDS[$i]}"
+      break
+    fi
+  done
+  [[ -n "$WORKSPACE_ID" ]] || die "internal: workspace id not resolved"
+fi
+
+for i in "${!WS_IDS[@]}"; do
+  if [[ "${WS_IDS[$i]}" == "$WORKSPACE_ID" ]]; then
+    WORKSPACE_NAME="${WS_NAMES[$i]}"
+    break
+  fi
+done
+
+log_ok "Workspace: ${WORKSPACE_NAME:-?}  ($WORKSPACE_ID)"
+if [[ -n "$CURRENT_WS_ID" && "$CURRENT_WS_ID" != "$WORKSPACE_ID" ]]; then
+  log_warn "MULTICA_WORKSPACE_ID in the environment ($CURRENT_WS_ID) differs from the chosen workspace; the script will override it for this run."
+fi
+
+# Scope every subsequent multica call to the chosen workspace so we never
+# accidentally create the agent in the wrong place.
+multica() { command multica --workspace-id "$WORKSPACE_ID" "$@"; }
 
 # --- pick runtime ----------------------------------------------------------
 
@@ -240,6 +327,7 @@ fi
 cat >&2 <<EOF
 
 About to $ACTION agent:
+  workspace:            ${WORKSPACE_NAME:-?}  ($WORKSPACE_ID)
   name:                 $AGENT_NAME
   description:          ${AGENT_DESC:-<none>}
   model:                ${AGENT_MODEL:-<runtime default>}
