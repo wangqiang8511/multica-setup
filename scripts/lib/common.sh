@@ -77,6 +77,42 @@ read_env_file() {
   done < "$file"
 }
 
+# Convert a dotenv-style file to a compact JSON object. Values keep their raw
+# form except that matching surrounding single/double quotes are stripped
+# (KEY="v" and KEY='v' both become {"KEY":"v"}). Missing file -> "{}".
+# Invalid lines cause die().
+env_file_to_json() {
+  local file="$1" json='{}' line key val first last
+  [[ -f "$file" ]] || { printf '%s' '{}'; return 0; }
+  while IFS= read -r line; do
+    [[ -z "${line// }" ]] && continue
+    [[ "${line#"${line%%[![:space:]]*}"}" == \#* ]] && continue
+    if [[ "$line" =~ ^[[:space:]]*([A-Za-z_][A-Za-z0-9_]*)[[:space:]]*=(.*)$ ]]; then
+      key=${BASH_REMATCH[1]}
+      val=${BASH_REMATCH[2]}
+      if [[ ${#val} -ge 2 ]]; then
+        first=${val:0:1}
+        last=${val: -1}
+        if { [[ "$first" == '"' && "$last" == '"' ]] || [[ "$first" == "'" && "$last" == "'" ]]; }; then
+          val=${val:1:${#val}-2}
+        fi
+      fi
+      json=$(jq -c --arg k "$key" --arg v "$val" '. + {($k): $v}' <<<"$json")
+    else
+      die "bad line in $file: $line"
+    fi
+  done < "$file"
+  printf '%s' "$json"
+}
+
+# Return 0 iff the installed multica CLI's help for the given subcommand
+# path (e.g. "agent create") mentions the given flag token.
+cli_supports_flag() {
+  local subcmd="$1" flag="$2"
+  # shellcheck disable=SC2086
+  command multica $subcmd --help 2>&1 | grep -q -- "$flag"
+}
+
 # Read a target_skills.md file and emit one entry per line:
 #   - full URL  -> printed as "url <URL>"
 #   - bare name -> printed as "name <NAME>"

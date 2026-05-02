@@ -66,8 +66,12 @@ max_concurrent_tasks: 6
 - **Names are identity.** `agent.yaml.name` is how the script finds an
   existing agent to update. Do not rename without manually archiving the old
   one first.
-- **Secrets don't live here.** `config.env` is for non-sensitive config. Real
-  secrets should be injected at create time via `--extra-env KEY=VALUE` on the
-  script (which adds to, not replaces, the file-based env).
+- **Secrets don't live here.** `config.env` is for non-sensitive config — it
+  is committed to git. For real secrets, set them directly on the agent in
+  the Multica web UI, or pipe a JSON object into
+  `multica agent update <id> --custom-env-stdin` after creation.
+- **CLI requirement.** Applying `config.env` needs `multica` >= 0.2.23
+  (adds `--custom-env-stdin`). On older CLIs the script aborts with an
+  upgrade hint rather than silently dropping the env.
 - **Skills are portable.** Prefer `skills.sh` URLs over custom skills so the
   definition works on any workspace.
