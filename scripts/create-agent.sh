@@ -34,19 +34,22 @@ AGENT_DIR=""
 DRY_RUN=0
 AUTO_YES=0
 WORKSPACE_ARG=""
+RUNTIME_ARG=""
 
 usage() {
   cat <<EOF >&2
-Usage: $0 <agent-dir> [--workspace <id|name>] [--dry-run] [--yes]
+Usage: $0 <agent-dir> [--workspace <id|name>] [--runtime <id|name>] [--dry-run] [--yes]
 
   <agent-dir>            Path to the agent definition (e.g. agents/agent-builder)
   --workspace <id|name>  Target workspace (skips the interactive picker)
+  --runtime <id|name>    Target runtime (skips the interactive picker; must be online)
   --dry-run              Print the multica commands but don't run them
   --yes                  Don't prompt for final confirmation
 
-The script picks a workspace interactively (or uses --workspace), picks a
-runtime from the online runtimes in that workspace, imports skills listed
-in target_skills.md, then creates or updates the agent.
+The script picks a workspace interactively (or uses --workspace), looks up
+any existing agent by name, picks a runtime (reusing the existing agent's
+runtime on update when it is still online, otherwise prompting), imports
+skills listed in target_skills.md, then creates or updates the agent.
 EOF
 }
 
@@ -61,6 +64,12 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     --workspace=*) WORKSPACE_ARG=${1#*=} ;;
+    -r|--runtime)
+      [[ $# -ge 2 ]] || die "--runtime requires a value"
+      RUNTIME_ARG=$2
+      shift
+      ;;
+    --runtime=*) RUNTIME_ARG=${1#*=} ;;
     --) shift; AGENT_DIR=${1:-}; break ;;
     -*) die "unknown flag: $1" ;;
     *)
@@ -217,27 +226,89 @@ fi
 # accidentally create the agent in the wrong place.
 multica() { command multica --workspace-id "$WORKSPACE_ID" "$@"; }
 
+# --- find existing agent by name ------------------------------------------
+
+# Done before runtime selection so that on re-runs we can silently reuse the
+# existing agent's runtime instead of prompting for one.
+AGENTS_JSON=$(multica agent list --output json)
+EXISTING_AGENT_ID=$(jq -r --arg n "$AGENT_NAME" '.[] | select(.name == $n and (.archived_at // null) == null) | .id' <<<"$AGENTS_JSON" | head -n1)
+EXISTING_AGENT_RUNTIME_ID=""
+if [[ -n "$EXISTING_AGENT_ID" ]]; then
+  EXISTING_AGENT_RUNTIME_ID=$(jq -r --arg id "$EXISTING_AGENT_ID" '.[] | select(.id == $id) | .runtime_id // ""' <<<"$AGENTS_JSON")
+fi
+
+ACTION=create
+if [[ -n "$EXISTING_AGENT_ID" ]]; then
+  ACTION=update
+fi
+
 # --- pick runtime ----------------------------------------------------------
 
 log_info "Fetching online runtimes…"
 RUNTIMES_JSON=$(multica runtime list --output json)
 
-# Build parallel arrays: ids, labels.
+# Build parallel arrays: ids, labels (online runtimes only — we never want to
+# create or re-point an agent at an offline runtime).
 mapfile -t RUNTIME_IDS    < <(jq -r '.[] | select(.status == "online") | .id' <<<"$RUNTIMES_JSON")
 mapfile -t RUNTIME_LABELS < <(jq -r '.[] | select(.status == "online") | "\(.name)  [\(.provider)]  (\(.id))"' <<<"$RUNTIMES_JSON")
 
 [[ ${#RUNTIME_IDS[@]} -gt 0 ]] || die "no online runtimes found in this workspace"
 
-CHOSEN_LABEL=$(pick_from_menu "Select a runtime:" "${RUNTIME_LABELS[@]}")
+# Look up a runtime by id or name. Prints the id on stdout (empty on no match).
+resolve_runtime() {
+  local q="$1"
+  jq -r --arg q "$q" '
+    .[] | select(.status == "online")
+        | select(.id == $q or .name == $q)
+        | .id
+  ' <<<"$RUNTIMES_JSON" | head -n1
+}
+
+runtime_label_for() {
+  local id="$1" i
+  for i in "${!RUNTIME_IDS[@]}"; do
+    if [[ "${RUNTIME_IDS[$i]}" == "$id" ]]; then
+      printf '%s' "${RUNTIME_LABELS[$i]}"
+      return 0
+    fi
+  done
+  printf ''
+}
+
 CHOSEN_RUNTIME_ID=""
-for i in "${!RUNTIME_LABELS[@]}"; do
-  if [[ "${RUNTIME_LABELS[$i]}" == "$CHOSEN_LABEL" ]]; then
-    CHOSEN_RUNTIME_ID="${RUNTIME_IDS[$i]}"
-    break
+CHOSEN_LABEL=""
+
+if [[ -n "$RUNTIME_ARG" ]]; then
+  CHOSEN_RUNTIME_ID=$(resolve_runtime "$RUNTIME_ARG")
+  [[ -n "$CHOSEN_RUNTIME_ID" ]] || die "runtime '$RUNTIME_ARG' not found or not online (try: multica runtime list)"
+  CHOSEN_LABEL=$(runtime_label_for "$CHOSEN_RUNTIME_ID")
+  log_ok "Runtime (from --runtime): $CHOSEN_LABEL"
+elif [[ "$ACTION" == "update" && -n "$EXISTING_AGENT_RUNTIME_ID" ]]; then
+  # Silently reuse the existing agent's runtime when it's still online.
+  # Falls through to the interactive picker if the recorded runtime has gone
+  # offline (or been removed from the workspace) so we never accidentally
+  # update an agent onto a dead runtime.
+  reused_label=$(runtime_label_for "$EXISTING_AGENT_RUNTIME_ID")
+  if [[ -n "$reused_label" ]]; then
+    CHOSEN_RUNTIME_ID="$EXISTING_AGENT_RUNTIME_ID"
+    CHOSEN_LABEL="$reused_label"
+    log_ok "Runtime (reusing existing agent's runtime): $CHOSEN_LABEL"
+  else
+    log_warn "Existing agent's runtime ($EXISTING_AGENT_RUNTIME_ID) is no longer online — pick a replacement."
   fi
-done
-[[ -n "$CHOSEN_RUNTIME_ID" ]] || die "internal: runtime id not resolved"
-log_ok "Runtime: $CHOSEN_LABEL"
+fi
+
+if [[ -z "$CHOSEN_RUNTIME_ID" ]]; then
+  CHOSEN_LABEL=$(pick_from_menu "Select a runtime:" "${RUNTIME_LABELS[@]}")
+  for i in "${!RUNTIME_LABELS[@]}"; do
+    if [[ "${RUNTIME_LABELS[$i]}" == "$CHOSEN_LABEL" ]]; then
+      CHOSEN_RUNTIME_ID="${RUNTIME_IDS[$i]}"
+      break
+    fi
+  done
+  [[ -n "$CHOSEN_RUNTIME_ID" ]] || die "internal: runtime id not resolved"
+  log_ok "Runtime: $CHOSEN_LABEL"
+fi
 
 # --- import / resolve skills ----------------------------------------------
 
@@ -310,16 +381,6 @@ if [[ "$ENV_KEY_COUNT" -gt 0 ]]; then
   if ! cli_supports_flag "agent create" "--custom-env-stdin"; then
     die "config.env has $ENV_KEY_COUNT var(s) but this multica CLI has no --custom-env-stdin flag. Upgrade: \`multica update\` (need >= 0.2.23)."
   fi
-fi
-
-# --- find existing agent by name ------------------------------------------
-
-AGENTS_JSON=$(multica agent list --output json)
-EXISTING_AGENT_ID=$(jq -r --arg n "$AGENT_NAME" '.[] | select(.name == $n and (.archived_at // null) == null) | .id' <<<"$AGENTS_JSON" | head -n1)
-
-ACTION=create
-if [[ -n "$EXISTING_AGENT_ID" ]]; then
-  ACTION=update
 fi
 
 # --- confirm --------------------------------------------------------------

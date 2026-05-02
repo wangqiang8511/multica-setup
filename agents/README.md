@@ -54,12 +54,19 @@ max_concurrent_tasks: 6
      (or pass `--workspace <id|name>` to skip the prompt). The chosen
      workspace is printed and scopes every subsequent `multica` call, so
      the agent is always created exactly where you confirmed.
-   - Let you pick a runtime from the online runtimes in that workspace.
+   - Look up the agent by `agent.yaml.name` to decide create vs update.
+   - Pick a runtime: on **create** it prompts from the online runtimes; on
+     **update** it silently reuses the existing agent's runtime (if still
+     online) so repeat runs sync in place without re-prompting. Pass
+     `--runtime <id|name>` to skip the picker entirely (useful for CI).
    - Import any skills from `target_skills.md` that are not yet in the
      workspace (`multica skill import --url ...`).
    - Create the agent if it does not exist, or update it if an agent with the
-     same `name` already does.
-   - Assign the listed skills to the agent.
+     same `name` already does. Instructions, `custom_args.json`, and
+     `config.env` are re-applied on every run so the workspace converges to
+     the declared state.
+   - Assign the listed skills to the agent, replacing any that were removed
+     from `target_skills.md`.
 
 ## Conventions
 
