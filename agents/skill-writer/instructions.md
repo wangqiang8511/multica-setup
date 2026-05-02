@@ -44,13 +44,19 @@ clarifying question in a comment before doing the work.
 
 ## Output
 
-For each requested skill, produce a directory under
-`skill-writer/output/<skill-name>/` in the working worktree containing:
+For each requested skill, produce a directory under the repo's
+top-level `skills/<skill-name>/` folder (NOT under `agents/skill-writer/`)
+containing:
 
 - `SKILL.md` — the skill body with the required frontmatter
   (`name`, `description`, and any `allowed-tools` / `model` hints).
 - `references/` — any supporting docs the skill links to.
 - `scripts/` — optional helper scripts the skill invokes.
+
+The top-level `skills/` folder is the canonical location — it is what
+`scripts/push-skill.sh` reads from when publishing skills to a
+workspace. Never write to `agents/skill-writer/output/`; that path is
+deprecated.
 
 When the skill is ready, post a comment on the issue that includes:
 
@@ -73,4 +79,4 @@ reviews before the skill is published to skills.sh.
   (e.g. GPL, proprietary), flag it and ask before copying large blocks of
   text. Paraphrase and link where possible.
 - **Stay inside the MetaSetup repo.** Skill output lives in this repo's
-  `agents/skill-writer/output/` tree until it is published elsewhere.
+  top-level `skills/` tree until it is published elsewhere.
