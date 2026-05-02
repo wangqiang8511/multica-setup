@@ -16,6 +16,14 @@ Agents are created in Multica by running the interactive script:
 
 The script picks a runtime, imports any missing skills listed in `target_skills.md`, and calls `multica agent create` with the right flags. See [agents/README.md](agents/README.md) for the full workflow.
 
+Custom skills (skills that don't live on skills.sh) are defined under `skills/<skill-name>/` and pushed into a workspace with:
+
+```bash
+./scripts/push-skill.sh skills/<skill-name>
+```
+
+See [skills/README.md](skills/README.md) for the layout and workflow.
+
 ## Layout
 
 ```
@@ -23,12 +31,16 @@ agents/
   README.md             — workflow + conventions
   _template/            — starter layout for new agents
   agent-builder/        — reference agent (this project's own builder)
+skills/
+  README.md             — workflow + conventions
+  _template/            — starter layout for new skills
 scripts/
-  create-agent.sh       — interactive create/update
+  create-agent.sh       — interactive agent create/update
+  push-skill.sh         — interactive skill create/update + file sync
   lib/common.sh         — shared helpers
 ```
 
 ## Constraints
 
-- This repo is the single source of truth for agent definitions on the MetaSetup project.
-- Changes land via PR — never create agents ad-hoc against the API.
+- This repo is the single source of truth for agent and custom skill definitions on the MetaSetup project.
+- Changes land via PR — never create agents or skills ad-hoc against the API.
