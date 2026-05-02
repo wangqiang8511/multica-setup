@@ -1,17 +1,17 @@
-# Skills for this agent
+# Skills for this agent.
 #
-# One entry per line. Two forms are accepted:
+# Format: one skills.sh URL per line. Lines starting with `#` are ignored.
 #
-#   1. A skills.sh URL, e.g.
-#        https://skills.sh/anthropics/find-skills
-#      The create script will call `multica skill import --url <url>` if
-#      the skill is not yet in the workspace.
+# Example:
+#   https://skills.sh/vercel-labs/skills/find-skills
+#   https://skills.sh/obra/superpowers/writing-skills
 #
-#   2. A bare skill name that is already installed in the workspace, e.g.
-#        find-skills
-#      The create script will look it up by name.
+# Find URLs via https://skills.sh or `https://skills.sh/api/search?q=<name>`.
 #
-# Lines starting with `#` are ignored.
-
-# https://skills.sh/anthropics/find-skills
-# https://skills.sh/anthropics/writing-skills
+# The create script derives the skill name from the last path segment of
+# each URL. If a skill with that name is already installed in the workspace
+# it is reused; otherwise it is imported with
+#   multica skill import --url <url>
+#
+# Bare skill names are also accepted as a fallback for skills that do not
+# yet have a public skills.sh URL.

@@ -31,9 +31,12 @@ max_concurrent_tasks: 6
 1. **Scaffold** — `cp -r agents/_template agents/<new-agent>` and edit the files.
 2. **Draft instructions** — write `instructions.md`. Include identity, working
    style, and constraints.
-3. **List skills** — in `target_skills.md`, list one `skills.sh` URL per line
-   (or a bare skill name already present in the workspace). Lines starting with
-   `#` are comments.
+3. **List skills** — in `target_skills.md`, list one `skills.sh` URL per line.
+   URLs are the portable, preferred form; the script derives the skill name
+   from the last path segment and reuses an already-installed skill by that
+   name, otherwise it imports via `multica skill import --url <url>`.
+   Bare skill names are accepted as a fallback for skills that do not yet
+   have a public skills.sh URL. Lines starting with `#` are comments.
 4. **Runtime config** — populate `config.env` and `custom_args.json` if the
    agent needs specific env vars (e.g. `CLAUDE_CODE_USE_BEDROCK=1`) or CLI
    flags.

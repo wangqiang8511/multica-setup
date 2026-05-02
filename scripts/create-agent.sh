@@ -168,17 +168,29 @@ while IFS=' ' read -r kind value; do
   [[ -z "${kind:-}" ]] && continue
   case "$kind" in
     url)
-      log_info "Importing skill from $value"
-      if [[ $DRY_RUN -eq 1 ]]; then
-        log_info "  (dry-run) multica skill import --url $value"
-        continue
+      # Derive the likely skill name from the last path segment of the URL
+      # so we can reuse an already-installed skill by that name instead of
+      # re-importing (and creating a duplicate) on every run.
+      derived_name="${value%/}"; derived_name="${derived_name##*/}"
+      sid=""
+      if [[ -n "$derived_name" ]]; then
+        sid=$(existing_skill_id_by_name "$derived_name")
       fi
-      imp_json=$(multica skill import --url "$value" --output json)
-      sid=$(jq -r '.id // empty' <<<"$imp_json")
-      [[ -n "$sid" ]] || die "skill import returned no id for $value"
-      SKILL_IDS+=("$sid")
-      # refresh cache so later name lookups see the import
-      EXISTING_SKILLS_JSON=$(multica skill list --output json)
+      if [[ -n "$sid" ]]; then
+        log_info "Skill '$derived_name' already in workspace ($sid) — reusing"
+        SKILL_IDS+=("$sid")
+      else
+        log_info "Importing skill from $value"
+        if [[ $DRY_RUN -eq 1 ]]; then
+          log_info "  (dry-run) multica skill import --url $value"
+          continue
+        fi
+        imp_json=$(multica skill import --url "$value" --output json)
+        sid=$(jq -r '.id // empty' <<<"$imp_json")
+        [[ -n "$sid" ]] || die "skill import returned no id for $value"
+        SKILL_IDS+=("$sid")
+        EXISTING_SKILLS_JSON=$(multica skill list --output json)
+      fi
       ;;
     name)
       sid=$(existing_skill_id_by_name "$value")
@@ -190,6 +202,11 @@ while IFS=' ' read -r kind value; do
     *) die "bad line in target_skills.md: $kind $value" ;;
   esac
 done < <(read_target_skills "$SKILLS_FILE")
+
+# Dedupe in case the same skill was referenced twice (e.g. URL + bare name).
+if [[ ${#SKILL_IDS[@]} -gt 0 ]]; then
+  mapfile -t SKILL_IDS < <(printf '%s\n' "${SKILL_IDS[@]}" | awk '!seen[$0]++')
+fi
 
 log_ok "${#SKILL_IDS[@]} skill(s) resolved"
 

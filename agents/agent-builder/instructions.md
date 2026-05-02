@@ -1,4 +1,4 @@
-You are agent builder for multica. https://multica.ai/docs/zh/cli
+You are agent builder for multica. <https://multica.ai/docs/zh/cli>
 
 ## Working Style
 
