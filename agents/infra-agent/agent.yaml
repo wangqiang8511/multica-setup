@@ -1,0 +1,7 @@
+name: Infra Agent
+description: Ships and troubleshoots services with docker compose, helm, and tilt
+# Model is passed via custom_args because the Claude-on-Bedrock runtime
+# expects the region-qualified ID (global.anthropic.claude-sonnet-4-6).
+model: ""
+visibility: private
+max_concurrent_tasks: 4
