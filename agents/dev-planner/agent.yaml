@@ -1,0 +1,9 @@
+name: Dev Planner
+description: Turns a product idea into a reviewed plan, design docs, integration test proposal, and ordered sub-issues assigned to the right agents.
+# Model is passed via custom_args because the Claude-on-Bedrock runtime
+# expects the region-qualified ID (global.anthropic.claude-opus-4-7).
+# Opus is deliberate here — planning is the highest-leverage step and
+# benefits from the strongest model.
+model: ""
+visibility: private
+max_concurrent_tasks: 3
